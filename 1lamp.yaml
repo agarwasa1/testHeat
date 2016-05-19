@@ -91,10 +91,10 @@ resources:
             echo "  network.interfaces: []" >> /etc/salt/minion
             echo "  grains.items: []" >> /etc/salt/minion           
             ##### Minion license authenication with master 
-            curl -Ssk https://192.168.0.34:8443/login -H 'Accept: application/x-yaml' -d username=$USER -d password=$PASS -d eauth=pam | awk '/token/ {printf $2}' > ~/token
+            curl -Ssk https://134.168.53.18:8000/login -H 'Accept: application/x-yaml' -d username=$USER -d password=$PASS -d eauth=pam | awk '/token/ {printf $2}' > ~/token
             service salt-minion start
             sleep 30      
-            curl -Ssk https://192.168.0.34:8443/hook/minions/key/accept -H 'Accept: application/x-yaml' -H "X-Auth-Token: `cat ~/token`" -d minion=$MINION_NAME
+            curl -Ssk https://134.168.53.18:8000/hook/minions/key/accept -H 'Accept: application/x-yaml' -H "X-Auth-Token: `cat ~/token`" -d minion=$MINION_NAME
             rm -f ~/token           
           params:
             $USER: { get_param: authentication_user}
