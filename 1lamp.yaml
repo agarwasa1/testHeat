@@ -1,76 +1,96 @@
 heat_template_version: 2013-05-23
 
 description: >
-  A blueprint that defines the Open Three Tier pattern. This stack includes a high-availability Apache Tomcat proxy server, two load-balanced Apache HTTP servers, and a MySQL database.
+  Created 5/19/16 by ucdpadmin. For Cloud patterns-service-dev@riddler
 
 parameters:
   authentication_user:
       type: string
       description: The user connecting to Salt API
       default: saltuser
- 
+
   authentication_pass:
       type: string
       description: Password for connecting to Salt API
       hidden: True
       default: us3rpa88
-      
   flavor:
     type: string
-    description: Flavor to be used for compute instance
-    default: "m1.small"
-  
+    description: 'Flavor to be used for compute instance'
+
   environment:
     type: string
     description: The environment the nodes are part of
     default: three_tier_lamp
-   
+
   salt_pillar:
     type: string
     description: Minion Pillar data
     default: '''{"service_port":"80","im_repo":"http://192.168.0.29/imrepo/","artifact_repo_root":"http://192.168.0.29/","mysql_password":"SomeP4ssw0rd"}'''
 
-  image:
-    type: string
-    description: Generated
-    default: '20ba0453-a0b2-4b44-9a50-2a308e3e939a'
-
   key_name:
     type: string
-    description: Generated
+    description: 'For most clouds, the name of the key-pair to be used for the compute instance; for VMware clouds, the contents of the public SSH key for the compute instance'
 
-  network_id_fbd19302-f247-4816-b53e-a664f3dc72c1:
+  availability_zone:
     type: string
-    description: Generated to reference 'patterns-service-dev-net' network.
+    description: 'Name of availability zone in which to create the instance'
+    default: 'lon02'
+
+  network-id__for__patterns-service-dev-net:
+    type: string
+    description: 'Generated to reference ''patterns-service-dev-net'' network.'
     default: 'fbd19302-f247-4816-b53e-a664f3dc72c1'
+
+  subnet_id_46fcd6d7-017e-437b-9921-d7fb9f76a7f2:
+    type: string
+    description: 'Generated to reference subnet ''46fcd6d7-017e-437b-9921-d7fb9f76a7f2''.'
+    default: '46fcd6d7-017e-437b-9921-d7fb9f76a7f2'
 
   public_network_id:
     type: string
-    description: Generated for floating IP
-    default: 'TODO'
+    description: 'Generated for floating IP'
+    default: 'public_network_id'
+
+  image:
+    type: string
+    description: 'rhel-7.2-2015-12-13'
+    label: Image
+    default: '20ba0453-a0b2-4b44-9a50-2a308e3e939a'
+
 resources:
- 
-  rhel_server_one:
+## REFERENCE {"patterns-service-dev-net":{"type": "OS::Neutron::Net", "properties": {"network_id": "fbd19302-f247-4816-b53e-a664f3dc72c1", "external":"false", "subnets": [{"id":"46fcd6d7-017e-437b-9921-d7fb9f76a7f2","name":"patterns-service-dev-subnet","cidr":"192.168.15.0\/24"}] }}}
+
+  rhel-7_2-2015-12-13:
     type: OS::Nova::Server
     properties:
       networks:
-          - port: { get_resource: server_one_fbd19302-f247-4816-b53e-a664f3dc72c1_port  }
-      name: load balancer
-      key_name: { get_param: key_name }
-      image: { get_param: image }
+          - port: { get_resource: rhel-7_2-2015-12-13__to__patterns-service-dev-net__port  }
+      name: "rhel-7_2-2015-12-13"
+      image: { get_param: image }  # rhel-7.2-2015-12-13
       flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      availability_zone: { get_param: availability_zone }
       config_drive: "True"
       user_data_format: RAW
       user_data:
         get_resource: server_one_init
-         
-  
-  server_one_init:
-    type: OS::Heat::MultipartMime
+
+
+  rhel-7_2-2015-12-13__to__patterns-service-dev-net__port__floating_ip:
+    type: OS::Neutron::FloatingIP
     properties:
-      parts:
-      - config: {get_resource: bootstrap_salt}
-      
+      floating_network_id: { get_param: public_network_id }
+      port_id: { get_resource: rhel-7_2-2015-12-13__to__patterns-service-dev-net__port }
+
+  rhel-7_2-2015-12-13__to__patterns-service-dev-net__port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: network-id__for__patterns-service-dev-net }
+      replacement_policy: AUTO   #TODO remove this if using HEAT version Icehouse!
+      fixed_ips:
+        - subnet: { get_param: subnet_id_46fcd6d7-017e-437b-9921-d7fb9f76a7f2 }
+
   bootstrap_salt:
     type: "OS::Heat::SoftwareConfig"
     properties:
@@ -80,8 +100,8 @@ resources:
             #!/usr/bin/env bash
             chkconfig salt-minion on
             mkdir -p /etc/salt/pki/minion
-     
-            ### Minion Configuration 
+
+            ### Minion Configuration
             HOSTNAME=`hostname -s`
             DELIMITER="_"
             MINION_NAME=$HOSTNAME$DELIMITER$IDENTIFIER
@@ -89,32 +109,25 @@ resources:
             echo "id: $MINION_NAME" >> /etc/salt/minion
             echo "mine_functions: " >> /etc/salt/minion
             echo "  network.interfaces: []" >> /etc/salt/minion
-            echo "  grains.items: []" >> /etc/salt/minion           
-            ##### Minion license authenication with master 
+            echo "  grains.items: []" >> /etc/salt/minion
+            ##### Minion license authenication with master
             curl -Ssk https://134.168.53.18:8000/login -H 'Accept: application/x-yaml' -d username=$USER -d password=$PASS -d eauth=pam | awk '/token/ {printf $2}' > ~/token
             service salt-minion start
-            sleep 30      
+            sleep 30
             curl -Ssk https://134.168.53.18:8000/hook/minions/key/accept -H 'Accept: application/x-yaml' -H "X-Auth-Token: `cat ~/token`" -d minion=$MINION_NAME
-            rm -f ~/token           
+            rm -f ~/token
           params:
             $USER: { get_param: authentication_user}
             $PASS: { get_param: authentication_pass}
             $IDENTIFIER: { get_param: 'OS::stack_name' }
-    
-          
-  server_one_server_one_fbd19302-f247-4816-b53e-a664f3dc72c1_port_floating_ip:
-    type: OS::Neutron::FloatingIP
-    properties:
-      floating_network_id: { get_param: public_network_id }
-      port_id: { get_resource: server_one_fbd19302-f247-4816-b53e-a664f3dc72c1_port }
 
-  server_one_fbd19302-f247-4816-b53e-a664f3dc72c1_port:
-    type: OS::Neutron::Port
+  server_one_init:
+    type: OS::Heat::MultipartMime
     properties:
-      network_id: { get_param: network_id_fbd19302-f247-4816-b53e-a664f3dc72c1 }
-
+      parts:
+      - config: {get_resource: bootstrap_salt}
 
 outputs:
   blueprint_url:
     description: Blueprint Origin URL
-    value:  http://9.27.175.179:8080/landscaper/view/projects?open=ucdpadmin_00000000_0000_0000_0000_000000000002-OrionContent/default/open_tier_lamp/three_tier_lamp.yml
+    value:  http://localhost:8080/landscaper/view/projects?open=ucdpadmin_00000000_0000_0000_0000_000000000002-OrionContent/default/floatingIP/floatingIP.yml
