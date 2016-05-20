@@ -1,0 +1,224 @@
+heat_template_version: 2013-05-23
+
+description: >
+  Single DB2 deployment
+
+parameters:
+############################
+# Server parameters
+############################
+
+  flavor:
+    type: string
+    description: Flavor to be used for compute instance
+    label: Flavor
+
+  key_name:
+    type: string
+    description: 'For most clouds, the name of the key-pair to be used for the compute instance; for VMware clouds, the contents of the public SSH key for the compute instance'
+    label: SSH Key name
+
+  private_network:
+    type: string
+    description: Private Network to deploy the instance onto
+    label: Private network
+
+  public_network:
+    type: string
+    description: Public Network for floating IP
+    label: Public network
+
+  availability_zone:
+    type: string
+    description: 'Name of availability zone in which to create the instance'
+    label: Availability zone
+    default: 'nova'
+
+  image_id:
+    type: string
+    description: OS Image to deploy onto
+    label: OS Image
+
+############################
+# Salt Specific Parameters
+############################
+
+  salt_master_address:
+    type: string
+    description: Hostname/IP address of the salt-master, leave blank to use metadata.yaml
+    label: Saltmaster address
+    default: ''
+
+  salt_api_user:
+    type: string
+    description: The user connecting to Salt API, leave blank to use metadata.yaml
+    label: Salt api user
+    default: ''
+
+  salt_api_pass:
+    type: string
+    description: Password for connecting to Salt API, leave blank to use metadata.yaml
+    label: Salt api password
+    hidden: True
+    default: ''
+
+parameter_groups:
+    - { label: 'Image Parameters', parameters: [flavor, key_name, availability_zone, image_id] }
+    - { label: 'Salt Deployment', parameters: [salt_master_address, salt_api_user, salt_api_pass] }
+    - { label: 'Network Parameters', parameters: [private_network, public_network] }
+
+resources:
+
+############################
+# DB2 Server
+############################
+
+  db2:
+    type: OS::Nova::Server
+    properties:
+      networks:
+        - port: { get_resource: db2_port }
+      image: { get_param: image_id }
+      flavor: { get_param: flavor }
+      availability_zone: { get_param: availability_zone }
+      key_name: { get_param: key_name }
+      user_data_format: RAW
+      user_data: { get_resource: db2_init }
+
+  db2_port__floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: { get_param: public_network }
+      port_id: { get_resource: db2_port }
+
+
+  db2_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: private_network }
+
+  db2_init:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+        - config: { get_resource: bootstrap_salt }
+
+############################
+#  General Scripts
+############################
+  bootstrap_salt:
+    type: "OS::Heat::SoftwareConfig"
+    properties:
+      config:
+        str_replace:
+          template: |
+            #!/usr/bin/env bash
+            echo "xxxxxxxxxxxxxxxxxxxxxxx"
+            set -e
+            # add lines for yum install
+            echo "xxxxxabout to installxxxxxxxxxxxxxxxxxx"
+            sudo yum -y install https://repo.saltstack.com/yum/redhat/salt-repo-latest-1.el7.noarch.rpm
+            echo "xxxxxabout to install 22222xxxxxxxxxxxxxxxxxx"
+            sudo yum clean expire-cache
+            echo "xxxxxabout to install 333333xxxxxxxxxxxxxxxxxx"
+            sudo yum -y install salt-minion
+            echo "xxxxxabout to install 44444xxxxxxxxxxxxxxxxxx"
+            # post install configure service
+            sudo chkconfig salt-minion on
+            sudo mkdir -p /etc/salt/pki/minion
+
+            # retrieve saltMaster address from metadata if not passed
+            saltMaster=$SALT_MASTER
+
+            # Default log_level warning
+            sudo cat > /etc/salt/minion << EOF
+            log_level: warning
+            master:
+              - $saltMaster
+            id: $STACK_ID-`hostname -s`
+            mine_functions:
+              network.interfaces: []
+              grains.items: []
+            mine_interval: 1
+            EOF
+
+            echo "xxxxx11111xxxxxxxxxxxxxxxxxx"
+            sudo service salt-minion stop
+            sleep 10
+            sudo service salt-minion start
+            sleep 30
+
+          params:
+            $SALT_API_USER: { get_param: salt_api_user}
+            $SALT_API_PASS: { get_param: salt_api_pass}
+            $STACK_ID: { get_param: "OS::stack_id" }
+            $SALT_MASTER: { get_param: salt_master_address }
+
+
+  assign_roles:
+    type: "OS::Heat::SoftwareConfig"
+    properties:
+      config:
+        str_replace:
+          template: |
+            #!/usr/bin/env bash
+            set -e
+            cat > /etc/salt/grains << EOF
+            environment:
+              $ENV
+            pattern:
+              $WORKLOAD_AUTOMATION
+            roles:
+              - $ROLES_1
+            stack:
+              $STACK_ID
+            EOF
+            sleep 30
+            service salt-minion stop
+            sleep 15
+            service salt-minion start
+          params:
+            $ENV: base
+            $WORKLOAD_AUTOMATION: ibm_db2
+            $ROLES_1: ibm_db2_v10x_linux
+            $STACK_ID: { get_param: "OS::stack_id" }
+
+
+  create_pillar_file:
+    type: OS::Heat::CloudConfig
+    properties:
+      cloud_config:
+        write_files:
+          - path: /tmp/pillar.yaml
+            content:
+              str_replace:
+                template: |
+                  ibm:
+                    sw_repo_root: $SW_REPO_ROOT
+                    workload_automation : $WORKLOAD_AUTOMATION
+                    database_type: $DATABASE_TYPE
+                    db2:
+                      v10x:
+                        users:
+                          $INSTANCEOWNER_NAME:
+                            password: $6$mn0q55HU$uXeOS6FPtAZcS8xlx97SBjVlvdcD3nmGy0YUqsMNscB7qFKWAd2DKV2zOPXj2BmLGCqfjJpEEbqr4JAwN4l.f.
+                          $FENCED_NAME:
+                            password: $6$St12FUju$QrsEPqLm1GYjCcy5p3vZ3q6fptc3pQPL0ZAFXLjcBVEc2REWNS/gQDmmTLuDg7HnSlKPLj9rRtC0ESftw60Vv0
+                params:
+                  $SW_REPO_ROOT: {get_param: sw_repo_root }
+                  $WORKLOAD_AUTOMATION: bluemix_db2_single
+                  $DATABASE_TYPE: DM
+
+
+#####################################################
+#  Output
+#####################################################
+
+outputs:
+  db2server:
+    description: Address of the db2 server
+    value:
+      str_replace:
+        params:
+          $IPADDR: { get_attr: [db2_port__floating_ip, floating_ip_address] }
+        template: Server IP $IPADDR
