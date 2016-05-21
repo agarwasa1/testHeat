@@ -98,6 +98,14 @@ resources:
         str_replace:
           template: |
             #!/usr/bin/env bash
+            echo "xxxxxabout to installxxxxxxxxxxxxxxxxxx"
+            sudo yum -y install https://repo.saltstack.com/yum/redhat/salt-repo-latest-1.el7.noarch.rpm
+            echo "xxxxxabout to install 22222xxxxxxxxxxxxxxxxxx"
+            sudo yum clean expire-cache
+            echo "xxxxxabout to install 333333xxxxxxxxxxxxxxxxxx"
+            sudo yum -y install salt-minion
+            echo "xxxxxabout to install 44444xxxxxxxxxxxxxxxxxx"
+            # post install configure service
             chkconfig salt-minion on
             mkdir -p /etc/salt/pki/minion
 
@@ -105,7 +113,7 @@ resources:
             HOSTNAME=`hostname -s`
             DELIMITER="_"
             MINION_NAME=$HOSTNAME$DELIMITER$IDENTIFIER
-            echo "master: 192.168.0.34" > /etc/salt/minion
+            echo "master: 134.168.53.18" > /etc/salt/minion
             echo "id: $MINION_NAME" >> /etc/salt/minion
             echo "mine_functions: " >> /etc/salt/minion
             echo "  network.interfaces: []" >> /etc/salt/minion
