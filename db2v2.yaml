@@ -27,6 +27,12 @@ parameters:
     type: string
     description: Public Network for floating IP
     label: Public network
+  
+  subnet_id_46fcd6d7-017e-437b-9921-d7fb9f76a7f2:
+    type: string
+    description: 'Generated to reference subnet ''46fcd6d7-017e-437b-9921-d7fb9f76a7f2''.'
+    default: '46fcd6d7-017e-437b-9921-d7fb9f76a7f2'
+
 
   availability_zone:
     type: string
@@ -96,6 +102,9 @@ resources:
     type: OS::Neutron::Port
     properties:
       network: { get_param: private_network }
+      replacement_policy: AUTO   #TODO remove this if using HEAT version Icehouse!
+      fixed_ips:
+        - subnet: { get_param: subnet_id_46fcd6d7-017e-437b-9921-d7fb9f76a7f2 }
 
   db2_init:
     type: OS::Heat::MultipartMime
